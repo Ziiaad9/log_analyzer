@@ -1,15 +1,30 @@
 import re
 
-
 def extract_from_row(row):
-    # Pattern avec un 5ème groupe optionnel pour l'IP à la fin de la ligne
-    pattern = re.compile(r'^(\w{3})\s+(\d+)\s+(\d{2}:\d{2}:\d{2}).+?:\s+(.+?)(?:from\s+(\d+\.\d+\.\d+\.\d+))?$')
+    # Pattern principal pour extraire date, heure et message
+    pattern = re.compile(r'^(\w{3})\s+(\d+)\s+(\d{2}:\d{2}:\d{2}).+?:\s+(.*)$')
     match = re.search(pattern, row)
+    
     if match:
-        print(
-            f'month: {match.group(1)}\n'
-            f'day of month: {match.group(2)}\n'
-            f'time: {match.group(3)}\n'
-            f'message: {match.group(4)}\n'
-            f'ip: {match.group(5) if match.lastindex >= 5 and match.group(5) else "N/A"}'
-        )
+        month = match.group(1)
+        day = match.group(2)
+        time = match.group(3)
+        message = match.group(4)
+        
+        # Extraction robuste de l'IP
+        ip_match = re.search(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', row)
+        ip = ip_match.group(0) if ip_match else "N/A"
+        
+        # Extraction du Port (Groupe 6)
+        port_match = re.search(r'port\s+(\d+)', row)
+        port = port_match.group(1) if port_match else "N/A"
+        
+        return {
+            "month": month,
+            "day": day,
+            "time": time,
+            "message": message,
+            "ip": ip,
+            "port": port
+        }
+    return None
