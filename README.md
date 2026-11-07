@@ -26,20 +26,22 @@ Vous aurez besoin de Python installé sur votre machine. Suivez ces étapes dans
 ```bash
 pip install requests matplotlib
 ```
-2. Lancer le traitement des données (Pipeline ETL) :
+**2. Lancer le traitement des données (Pipeline ETL) :**
 
 Cette étape va lire le dossier data/, géolocaliser les IPs et remplir la base de données SQLite.
 
-Bash
-python storage/database.py
+```bash
+python storage/database.py 
+```
 
 (Patientez quelques secondes le temps du traitement. Un message de succès s'affichera à la fin).
 
-3. Afficher le tableau de bord analytique :
+**3. Afficher le tableau de bord analytique :**
 Une fois la base de données prête, lancez cette commande pour générer et afficher les graphiques :
 
-Bash
+```bash
 python serving/dashboard.py
+```
 
 👨‍💻 Auteur
-Mohammed Ziad - Étudiant en Ingénierie Logicielle - ESISA
+Mohammed Ziad-Étudiant en Ingénierie Logicielle - ESISA
