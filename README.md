@@ -1,47 +1,81 @@
 # 📊 SSH Log Analyzer
 
-Bienvenue sur mon projet d'analyse de logs SSH ! J'ai développé ce pipeline ETL (Extraction, Transformation, Chargement) de zéro dans le cadre de mon projet d'ingénierie des données à l'EST Fès. 
+Bienvenue sur mon projet d'analyse de logs SSH ! J'ai développé ce pipeline ETL (Extraction, Transformation, Chargement) complet et modulaire dans le cadre de mes études en Ingénierie des Données.
 
-L'objectif de ce projet est de partir de fichiers de logs d'authentification bruts (`auth.log`) pour en extraire des statistiques de sécurité claires et visuelles. J'ai fait le choix d'utiliser un minimum de bibliothèques externes pour garder le projet léger et montrer la maîtrise des outils standards de Python.
+L'objectif de ce projet est de partir d'un volume massif de logs d'authentification bruts (`auth.log` - plus de **65 565 lignes**) afin d'extraire, géolocaliser et stocker les tentatives d'accès SSH pour générer un tableau de bord analytique de sécurité.
 
-## ✨ Ce que fait le code
+---
 
-* **Parsing (Ingestion & Extraction) :** Je parcours les fichiers de logs bruts et j'extrais les informations essentielles (Date, Heure, IP, Port, Message) en utilisant des expressions régulières (Regex).
-* **Géolocalisation & Cache :** J'utilise l'API `ipinfo.io` pour identifier le pays d'origine des adresses IP. Comme l'API limite le nombre de requêtes, j'ai mis en place un système de **cache en mémoire**. Cela permet de ne jamais interroger l'API deux fois pour la même IP, évitant ainsi les blocages et accélérant drastiquement le traitement !
-* **Stockage :** Une fois les données nettoyées et géolocalisées, elles sont sauvegardées proprement dans une base de données relationnelle locale `SQLite` (`logs_analysis.db`).
-* **Dashboard (Serving) :** Un script dédié interroge la base de données via SQL et génère un tableau de bord interactif avec `matplotlib` affichant 3 métriques clés :
-  1. Le nombre de tentatives échouées par pays.
-  2. Le nombre de tentatives réussies par utilisateur.
-  3. Le nombre de tentatives échouées avec "invalid user" par pays.
+## 🛠️ Stack Technique & Architecture
 
-## 📂 Prérequis de structure
+* **Gestionnaire de projet & Environnement :** `uv`
+* **Langage & Traitement :** Python (Regex, `pandas`)
+* **Base de Données :** PostgreSQL (`psycopg2-binary`)
+* **Géolocalisation & Optimisation :** API `ipinfo.io` + **Cache en mémoire** (In-Memory Caching & Rate-Limit Handling)
+* **Visualisation (Serving) :** `matplotlib`
 
-Pour que le projet fonctionne correctement, assurez-vous de placer vos fichiers de logs (ex: `auth.log`, `auth.log.1`, `auth.log.2`, etc.) à l'intérieur d'un dossier nommé **`data/`** situé à la racine du projet.
+---
 
-## 🚀 Comment lancer le projet ?
+## ✨ Fonctionnalités Majeures du Pipeline
 
-Vous aurez besoin de Python installé sur votre machine. Suivez ces étapes dans votre terminal :
+* **Ingestion & Parsing (`ingestion/raw.py`, `process/extract_transform.py`) :** Parcours des fichiers de logs bruts et extraction structurée (Mois, Jour, Heure, IP, Port, Message) via expressions régulières (Regex).
+* **Géolocalisation Haute Performance (`process/geolocation.py`) :** 
+  * Intégration d'un **système de cache en mémoire** (`IP_CACHE`) pour mémoriser les adresses IP déjà interrogées. Cela évite les requêtes redondantes et permet d'insérer plus de 65 000 lignes en quelques minutes.
+  * Gestion automatique du **Rate Limiting (HTTP 429)** de l'API `ipinfo.io` sans interrompre l'exécution du script.
+* **Stockage Relationnel PostgreSQL (`storage/database.py`) :**
+  * Migration réussie de SQLite vers **PostgreSQL** (`log_analysis`).
+  * Réinitialisation propre de la table via `TRUNCATE TABLE ssh_logs RESTART IDENTITY`.
+  * Sauvegarde progressive (`commit` par lots de 1 000 lignes) pour garantir l'intégrité et la rapidité du traitement.
+* **Dashboard Analytics & Visualisation (`serving/dashboard.py`) :**
+  * Connexion directe à PostgreSQL via `psycopg2` et requêtage optimisé avec `pandas`.
+  * Nettoyage et filtrage dynamique des métriques pour exclure le trafic local (`127.0.0.1`, `Local`) et les limites d'API (`Limit_Reached`).
+  * Génération automatique d'un tableau de bord visuel `matplotlib` affichant :
+    1. **Top 10 des Pays** d'origine des attaques.
+    2. **Top 10 des Adresses IP** les plus agressives.
+    3. **Top 10 des Ports** les plus ciblés.
 
-**1. Installez les dépendances nécessaires :**
-```bash
-pip install requests matplotlib
-```
-**2. Lancer le traitement des données (Pipeline ETL) :**
+---
 
-Cette étape va lire le dossier data/, géolocaliser les IPs et remplir la base de données SQLite.
+## 📂 Structure du Projet
 
-```bash
-python storage/database.py 
-```
+```text
+log_analyzer/
+├── data/                  # Fichiers de logs bruts (auth.log, auth.log.1, etc.)
+├── ingestion/
+│   └── raw.py             # Lecture et extraction brute des lignes
+├── process/
+│   ├── extract_transform.py # Extraction Regex des champs
+│   └── geolocation.py     # API ipinfo.io avec cache & gestion 429
+├── storage/
+│   └── database.py        # Connexion PostgreSQL & insertion par lots
+├── serving/
+│   └── dashboard.py       # Récupération pandas & visualisations matplotlib
+└── README.md
 
-(Patientez quelques secondes le temps du traitement. Un message de succès s'affichera à la fin).
+🚀 Comment lancer le projet ?
+1. Prérequis & Base de données
+Assurez-vous d'avoir une instance PostgreSQL en cours d'exécution avec la base de données log_analysis créée (utilisateur postgres, mot de passe 123).
 
-**3. Afficher le tableau de bord analytique :**
-Une fois la base de données prête, lancez cette commande pour générer et afficher les graphiques :
+Placez vos fichiers de logs (ex: auth.log, auth.log.1, etc.) dans un dossier nommé data/ à la racine du projet.
 
-```bash
-python serving/dashboard.py
-```
+2. Gestion des dépendances avec uv
+Installez les bibliothèques requises :
+
+Bash
+uv add psycopg2-binary pandas matplotlib requests
+
+3. Exécution du Pipeline ETL (Insertion dans PostgreSQL)
+Lancez l'exécution du module de stockage pour créer la table et insérer l'intégralité des 65 565 lignes :
+
+Bash
+uv run python -m storage.database
+
+4. Affichage du Tableau de Bord Analytique
+Une fois les données insérées dans PostgreSQL, lancez cette commande pour afficher les graphiques de sécurité :
+
+Bash
+uv run python -m serving.dashboard
 
 👨‍💻 Auteur
-Mohammed Ziad-Étudiant en Ingénierie Logicielle - ESISA
+
+Mohammed Ziad — Étudiant en Ingénierie Logicielle-ESISA
