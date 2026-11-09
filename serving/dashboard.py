@@ -1,108 +1,78 @@
-import sqlite3
-import os
-import re
+import psycopg2
+import pandas as pd
 import matplotlib.pyplot as plt
-from collections import Counter
+import warnings
+
+# Ignorer les avertissements mineurs de Pandas liés aux connexions directes PostgreSQL
+warnings.filterwarnings('ignore', category=UserWarning)
 
 def get_db_connection():
-    db_path = os.path.join(os.path.dirname(__file__), '..', 'storage', 'logs_analysis.db')
-    return sqlite3.connect(db_path)
+    """Établit la connexion à la base de données PostgreSQL log_analysis."""
+    return psycopg2.connect(
+        dbname="log_analysis", 
+        user="postgres",
+        password="123", 
+        host="localhost",
+        port="5432"
+    )
 
 def generate_dashboard():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # ==========================================
-    # 1: Tentatives échouées par pays (Filtre Unknown/Local)
-    # ==========================================
-    cursor.execute('''
-        SELECT country, COUNT(*) 
-        FROM ssh_logs 
-        WHERE (message LIKE '%Failed password%' OR message LIKE '%authentication failure%')
-          AND country != 'Unknown' 
-          AND country != 'Local'
-        GROUP BY country 
-        ORDER BY COUNT(*) DESC 
-        LIMIT 10
-    ''')
-    failed_by_country = cursor.fetchall()
-
-    # ==========================================
-    # 2: Tentatives réussies par user (Correction de la Regex)
-    # ==========================================
-    cursor.execute('''
-        SELECT message 
-        FROM ssh_logs 
-        WHERE message LIKE '%session opened%' 
-           OR message LIKE '%Accepted password%'
-    ''')
-    success_messages = cursor.fetchall()
+    """Récupère les données et génère les graphiques Matplotlib."""
+    print("📊 Connexion à PostgreSQL et récupération des données en cours...")
     
-    success_users = []
-    for (msg,) in success_messages:
-        # Regex améliorée pour capturer le VRAI nom d'utilisateur (ex: "root")
-        match = re.search(r'(?:for user |user |for )([a-zA-Z0-9_.-]+)', msg)
-        if match:
-            user = match.group(1)
-            if user not in ['from', 'port']:
-                success_users.append(user)
-                
-    user_counts = Counter(success_users).most_common(10)
+    try:
+        conn = get_db_connection()
+        df = pd.read_sql_query("SELECT * FROM ssh_logs;", conn)
+        conn.close()
+    except Exception as e:
+        print(f"❌ Erreur lors de la connexion: {e}")
+        return
 
-    # ==========================================
-    # 3: Tentatives "invalid user" par pays (Filtre Unknown/Local)
-    # ==========================================
-    cursor.execute('''
-        SELECT country, COUNT(*) 
-        FROM ssh_logs 
-        WHERE message LIKE '%Invalid user%' 
-          AND country != 'Unknown' 
-          AND country != 'Local'
-        GROUP BY country 
-        ORDER BY COUNT(*) DESC 
-        LIMIT 10
-    ''')
-    invalid_users_data = cursor.fetchall()
+    if df.empty:
+        print("⚠️ Aucune donnée trouvée.")
+        return
 
-    conn.close()
+    print(f"✅ {len(df)} lignes récupérées ! Création des graphiques...")
 
-    # ==========================================
-    # DESSIN DU DASHBOARD
-    # ==========================================
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    fig.suptitle('Dashboard d\'Analyse des Logs SSH', fontsize=18, fontweight='bold', color='#333333')
+    plt.figure(figsize=(15, 10))
+    plt.suptitle("Tableau de Bord - Analyse des Logs SSH", fontsize=16, fontweight='bold', y=0.98)
 
-    # Graphique 1
-    if failed_by_country:
-        countries, counts = zip(*failed_by_country)
-        axes[0].bar(countries, counts, color='tomato', edgecolor='black')
-        axes[0].set_title('Tentatives échouées par pays', fontsize=12)
-        axes[0].set_ylabel('Nombre de tentatives')
-        axes[0].tick_params(axis='x', rotation=45)
-        for i, v in enumerate(counts):
-            axes[0].text(i, v + (max(counts)*0.01), str(v), ha='center')
+    # 1. Top 10 des Pays (FILTRÉ)
+    plt.subplot(2, 2, 1)
+    # Hna kan-7iydo Limit_Reached, Local, w Unknown
+    df_countries = df[~df['country'].isin(['Limit_Reached', 'Local', 'Unknown'])]
+    top_countries = df_countries['country'].value_counts().head(10)
+    top_countries.plot(kind='bar', color='skyblue', edgecolor='black')
+    plt.title('Top 10 des Pays')
+    plt.xlabel('Pays')
+    plt.ylabel('Nombre de requêtes')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
 
-    # Graphique 2
-    if user_counts:
-        users, u_counts = zip(*user_counts)
-        axes[1].bar(users, u_counts, color='mediumseagreen', edgecolor='black')
-        axes[1].set_title('Tentatives réussies par utilisateur', fontsize=12)
-        axes[1].set_ylabel('Nombre de réussites')
-        axes[1].tick_params(axis='x', rotation=45)
-        for i, v in enumerate(u_counts):
-            axes[1].text(i, v + (max(u_counts)*0.01), str(v), ha='center')
+    # 2. Top 10 des Adresses IP (FILTRÉ)
+    plt.subplot(2, 2, 2)
+    # Hna kan-7iydo N/A w l-adresses locales bhal 127.0.0.1
+    df_ips = df[~df['ip_address'].isin(['N/A', '127.0.0.1'])]
+    top_ips = df_ips['ip_address'].value_counts().head(10)
+    top_ips.plot(kind='bar', color='salmon', edgecolor='black')
+    plt.title('Top 10 des Adresses IP ciblées')
+    plt.xlabel('Adresse IP')
+    plt.ylabel('Nombre de requêtes')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
 
-    # Graphique 3
-    if invalid_users_data:
-        inv_countries, inv_counts = zip(*invalid_users_data)
-        axes[2].bar(inv_countries, inv_counts, color='orange', edgecolor='black')
-        axes[2].set_title('Tentatives "Invalid User" par pays', fontsize=12)
-        axes[2].set_ylabel('Nombre de tentatives')
-        axes[2].tick_params(axis='x', rotation=45)
-        for i, v in enumerate(inv_counts):
-            axes[2].text(i, v + (max(inv_counts)*0.01), str(v), ha='center')
+    # 3. Top 10 des Ports visés (Déjà filtré f l'ancien code)
+    plt.subplot(2, 2, 3)
+    df_ports = df[df['port'].notna() & (df['port'] != '') & (df['port'] != 'N/A')]
+    top_ports = df_ports['port'].value_counts().head(10)
+    top_ports.plot(kind='bar', color='lightgreen', edgecolor='black')
+    plt.title('Top 10 des Ports Visés')
+    plt.xlabel('Port')
+    plt.ylabel('Nombre de requêtes')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
 
 if __name__ == "__main__":
