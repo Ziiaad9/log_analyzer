@@ -1,77 +1,61 @@
-import sqlite3
-import os
-import sys
+import psycopg2
+from process import extract_transform
+from ingestion import raw
+from process import geolocation
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from process.extract_transform import extract_from_row
-from process.geolocation import get_location
-from ingestion.raw import towRows
+def get_db_connection():
+    return psycopg2.connect(
+        dbname="log_analysis", 
+        user="postgres",
+        password="123", 
+        host="localhost",
+        port="5432"
+    )
 
-def init_db(db_name="logs_analysis.db"):
-    db_path = os.path.join(os.path.dirname(__file__), db_name)
-    conn = sqlite3.connect(db_path)
+def setup_database():
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS ssh_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            month TEXT,
-            day TEXT,
-            time TEXT,
+            id SERIAL PRIMARY KEY,
+            month VARCHAR(50),
+            day VARCHAR(50),
+            time VARCHAR(50),
+            ip_address VARCHAR(50),
+            port VARCHAR(20),
             message TEXT,
-            ip TEXT,
-            port TEXT,
-            country TEXT
+            country VARCHAR(100)
         )
     ''')
-    conn.commit()
-    return conn, cursor
-
-def store_logs(data_path):
-    conn, cursor = init_db()
     
-    # Vider la table pour repartir à zéro
-    cursor.execute('DELETE FROM ssh_logs')
+    # HAD S-STER HOWA LI KAY-KHWI L-TABLE MN DAK "UNKNOWN" L-9DIM AUTOMATIQUEMENT
+    cursor.execute('TRUNCATE TABLE ssh_logs RESTART IDENTITY')
     
-    raw_lines = towRows(data_path)
-    inserted_count = 0
+    logs = raw.towRows('./data')
+    total = len(logs)
+    print(f"🚀 Début du traitement de {total} logs...")
     
-    # Dictionnaire cache pour ne pas interroger l'API 2 fois pour la même IP
-    ip_cache = {}
-    
-    print("Traitement et géolocalisation des logs en cours...")
-    for row in raw_lines:
-        parsed_data = extract_from_row(row)
-        if parsed_data:
-            ip = parsed_data['ip']
-            
-            # Gestion du Cache pour l'IP
-            if ip == "N/A" or ip.startswith("127.") or ip.startswith("10.") or ip.startswith("192.168."):
-                country = "Local"
-            elif ip in ip_cache:
-                country = ip_cache[ip]  # On récupère depuis le cache si déjà vu
-            else:
-                country = get_location(ip)
-                ip_cache[ip] = country  # On sauvegarde dans le cache
-            
+    for i, log_line in enumerate(logs):
+        extracted = extract_transform.extract_from_row(log_line)
+        if extracted:
+            country = geolocation.get_location(extracted['ip'])
             cursor.execute('''
-                INSERT INTO ssh_logs (month, day, time, message, ip, port, country)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ssh_logs (month, day, time, ip_address, port, message, country)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             ''', (
-                parsed_data['month'], 
-                parsed_data['day'], 
-                parsed_data['time'], 
-                parsed_data['message'], 
-                ip, 
-                parsed_data['port'],
-                country
+                extracted['month'], extracted['day'], extracted['time'], 
+                extracted['ip'], extracted['port'], extracted['message'], country
             ))
-            inserted_count += 1
+        
+        if i % 1000 == 0 and i > 0:
+            print(f"⏳ {i} / {total} lignes traitées...")
+            conn.commit() 
             
     conn.commit()
+    cursor.close()
     conn.close()
-    print(f"Succès ! {inserted_count} lignes insérées avec succès dans la base de données.")
+    print("✅ Données insérées avec succès dans PostgreSQL !")
 
 if __name__ == "__main__":
-    path_to_data = os.path.join(os.path.dirname(__file__), '..', 'data')
-    store_logs(path_to_data)
+    setup_database()
